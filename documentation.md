@@ -1,51 +1,66 @@
-# Technical Documentation & System Profiling
+# Technical Documentation
 
-## System Capabilities & Benchmarks
+## Overview
 
-### 1. Data Input Limitations & Capacity
+This application is a local resume screening workflow built around four core steps:
 
-- **Upload Limit:** The Streamlit dashboard file_uploader has a default memory limit of \~200MB per session.
-- **Resume Capacity:** Assuming an average resume is 1MB to 3MB, the system can realistically ingest **50 to 150 resumes per batch** comfortably without requiring chunking at the stream-ingestion level.
-- **Database Scale:** The local Chroma DB handles hundreds of thousands of document embeddings fluidly. Because embeddings are stored on disk locally, database sizes can scale until your local C:/D: drive fills up.
+1. Parse uploaded resumes into structured text and metadata.
+2. Embed resume sections into a local vector database.
+3. Rank candidates against a job description.
+4. Answer recruiter questions from retrieved resume context.
 
-### 2. Processing Speed Execution Breakdown
+## Parsing Pipeline
 
-- **Parsing (Phase 1):** Single-threaded parsing historically takes \~1.5s per PDF. With the implemented ThreadPoolExecutor and the spaCy module optimization (Disabling tagger/parser/lemmatizer), the system can scan and regex-map \~50 resumes in **under 3 seconds**.
-- **Embedding (Phase 2):** Utilizing SentenceTransformer.
-  - *On CPU (Current Python 3.14 state):* \~0.1 to 0.4 seconds per resume logic segment. 50 resumes translate to \~250 segments = \~10-15 seconds total.
-  - *On GPU (PyTorch CUDA state):* \~1.5 seconds *total* for the entire batch.
-- **Ranking (Phase 3):** Strict python dictionary math. Ranking 50 extracted candidates against a Job Description evaluates in **< 50 milliseconds**.
-- **RAG Chatbot Latency (Phase 4):**
-  - Querying the local ChromaDB takes <10ms.
-  - Providing the LLM Generation response depends entirely on the Local LLM. Running a small 4B-8B parameter model (e.g., Llama 3 8B, Nemotron 4B) on LM Studio with GPU offload enabled generally gives 15-40 tokens per second. Average answers take **2.5 to 4.5 seconds** to stream.
+`parser.py` handles ingestion for PDF and DOCX files.
 
-## Module Details
+- PDF text is extracted with `pdfplumber`.
+- DOCX text is extracted with `python-docx`.
+- Emails and phone numbers are matched with regex.
+- Skills are detected with a compact synonym map and a single compiled regex.
+- Candidate names are estimated with spaCy, then a simple heuristic fallback is used if the model is not available.
+- Resume sections are split into `contact`, `skills`, `experience`, `education`, `projects`, and `other`.
 
-### The Semantic Ranker Formula
+The parser returns a pandas DataFrame with one row per resume.
 
-In ranker.py, the system maps the distance measurements returned by ChromaDB into a mathematical percentage based formula.
+## Vector Storage
 
-- ChromaDB uses L2 Distance (lower is closer). This is translated to a resemblance score (1 / (1 + distance)).
-- The final calculation computes the Final Score = (0.5 *Semantic Score) + (0.3* Skill Match Ratio) + (0.2 * Experience Fit Ratio).
-- If a candidate wants $X$ years of experience and candidate has $Y$, the calculation min(Y / X, 1.0) is run, penalizing candidates that fall short, but returning a capped 1.0 if they exceed the requisite.
+`database.py` stores embedded text chunks in ChromaDB.
 
-### How the RAG Agent Answers
+- Each non-empty resume section becomes one chunk.
+- Metadata includes `candidate_id`, `email`, `skills`, `years_of_exp`, `is_intern`, and `section`.
+- The database uses a persistent local directory named `chroma_db/`.
+- Embeddings are loaded lazily so the app can start without immediately downloading the model.
 
-RAG (Retrieval-Augmented Generation) prevents the Agent from "guessing" resume contents.
+## Ranking Logic
 
-**Step A (The Routing Filter)**:
-When a user types: "Do we have any AWS candidates?"
-The router parses this into JSON:
-{"search_str": "AWS candidates", "filter": {}}
+`ranker.py` calculates a weighted candidate score.
 
-**Step B (The Vector Ping)**:
-search_str creates an embedding array and queries ChromaDB for the closest semantic math calculations. The DB physically isolates the exact resume texts (ex: "Candidate C_1_Jack.pdf: I worked with Amazon Web Services for 5 years.").
+- Semantic similarity contributes 50 percent.
+- Skill overlap contributes 30 percent.
+- Experience fit contributes 20 percent.
 
-**Step C (The Synthesizer Prompt)**:
-A System Prompt is built combining the original intent with the DB Context string.
-*System Prompt:* "Answer the recruiter's query using ONLY the provided context. Cite candidate IDs."
-*Context Input:* "[Candidate ID: C_1]: I worked with Amazon web..."
-*User Query:* "Do we have any AWS candidates?"
+The final score is a deterministic blend of those three values, sorted from highest to lowest.
 
-**Step D (Inference)**:
-The Local LLM (LM Studio) receives this massive chunk of prompt text. Because it is given strict instructions and absolute context, it is algorithmically forced to generate: "Yes, Candidate C_1 has experience working with Amazon Web Services for 5 years." It does this entirely via self-attention token prediction based strictly on the text provided dynamically from the DB script.
+## RAG Chat Flow
+
+`agent.py` implements the recruiter assistant.
+
+1. The router converts a user question into JSON.
+2. The router may apply a metadata filter such as `is_intern`.
+3. ChromaDB returns the closest matching resume sections.
+4. The synthesizer answers using only the retrieved text and candidate IDs.
+
+If the model produces malformed JSON, the router falls back to a direct semantic search query with no filter.
+
+## Runtime Assumptions
+
+- The app expects a local OpenAI-compatible endpoint, such as LM Studio.
+- The spaCy model `en_core_web_sm` improves name extraction but is optional.
+- The ChromaDB collection persists locally between runs.
+
+## Practical Limitations
+
+- Skill matching depends on the skill map in `parser.py`.
+- OCR is not included, so image-only PDFs will not parse well.
+- The answer quality of the chat assistant depends on the retrieved chunks and the local model.
+- This tool should be treated as an assistive screening aid, not an automated hiring decision maker.

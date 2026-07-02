@@ -1,26 +1,78 @@
-# AI Resume Screening & Candidate Search System (RAG-Based)
+# AI Resume Screening and Candidate Search
 
-## Overview
+Local Streamlit app for screening resumes, ranking candidates against a job description, and querying the candidate pool with a retrieval-augmented chat assistant.
 
-This project is a 100% private, locally-hosted AI Resume Screening System. It allows HR professionals or recruiters to upload bulk resumes (PDF/DOCX), parse them intelligently, rank them mathematically against a specific Job Description (JD), and chat with an AI Agent to discover insights from the candidate pool using Retrieval-Augmented Generation (RAG).
+## What it does
 
-Because it connects to local LLM servers (like LM Studio) and relies on an internal ChromaDB vector database, **no candidate data ever leaves your machine**.
+- Upload PDF or DOCX resumes from the sidebar.
+- Extract contact info, skills, experience hints, and document sections.
+- Store resume sections in a local ChromaDB collection.
+- Rank candidates against a job description using semantic similarity, skill overlap, and experience fit.
+- Ask natural-language questions about the resume pool through a local OpenAI-compatible model such as LM Studio.
 
-## Key Features
+## How it works
 
-- **Phase 1: Concurrent Parsing:** Multithreaded text extraction utilizing pdfplumber and python-docx, combined with stripped-down spaCy NLP and Master Regex algorithms for ultra-fast metadata extraction.
-- **Phase 2: Vector Search:** ChromaDB paired with SentenceTransformers (all-MiniLM-L6-v2) converts logical resume segments into searchable semantic vectors. Automatically falls back to CPU due to Python 3.14 PyTorch constraints.
-- **Phase 3: Hybrid Mathematical Ranking:** Candidates are ranked against a Job Description using a strict deterministic algorithm balancing semantic similarity, hard skill overlap, and experience fit.
-- **Phase 4: Agentic Chatbot:** A two-part LLM agent logic using LangChain. A *Router* converts user intent into DB filters, and a *Synthesizer* enforces strict resume citations to prevent AI hallucinations.
-- **Phase 5: Interactive UI:** Built on Streamlit, providing a clean dashboard and Plotly analytics for missed skills.
+1. `parser.py` reads each file and extracts text with `pdfplumber` or `python-docx`.
+2. The parser uses regex plus spaCy to identify skills, contact details, and a likely candidate name.
+3. `database.py` embeds each resume section with `sentence-transformers` and stores the vectors in local ChromaDB persistence.
+4. `ranker.py` compares the job description against retrieved chunks and computes a weighted score.
+5. `agent.py` routes a question into a semantic search query plus optional metadata filters, then answers from retrieved context.
 
-## Quickstart (Locally)
+## Quickstart
 
-1. Provide an OpenAI-compatible Local LLM Server (e.g., LM Studio running on port 1234).
-2. Activate your virtual environment: .venv\Scripts\Activate.ps1
-3. Install requirements (assuming prior execution).
-4. Run the UI: streamlit run app.py
+1. Create and activate a virtual environment.
+2. Install dependencies:
 
-## Privacy & Security
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-This application does not require a cloud connection or paid API keys. Set up LM Studio locally, load an LLM (e.g., Nemotron or Llama3), and the system will proxy its LangChain AI calls directly to your localhost endpoint.
+3. Install the spaCy model if you want better name extraction:
+
+   ```bash
+   python -m spacy download en_core_web_sm
+   ```
+
+4. Start a local OpenAI-compatible server such as LM Studio.
+5. Run the app:
+
+   ```bash
+   streamlit run app.py
+   ```
+
+## Configuration
+
+The app defaults to:
+
+- ChromaDB persistence at `chroma_db/`
+- LM Studio base URL: `http://localhost:1234/v1`
+- LM Studio API key placeholder: `lm-studio`
+
+You can override the LLM endpoint with environment variables:
+
+- `LM_STUDIO_BASE_URL`
+- `LM_STUDIO_API_KEY`
+
+See `.env.example` for a sample setup.
+
+## Project Structure
+
+- `app.py` - Streamlit UI
+- `parser.py` - Resume text extraction and metadata parsing
+- `database.py` - ChromaDB persistence and embedding search
+- `ranker.py` - Candidate ranking logic
+- `agent.py` - RAG chat assistant
+- `documentation.md` - Technical notes
+- `architecture.md` - High-level system flow
+
+## Notes and Limitations
+
+- The skill dictionary is intentionally small and easy to extend.
+- The parser is heuristic-based, so some resumes will extract better than others.
+- If the spaCy model is missing, the app still runs, but name extraction is weaker.
+- The embedding model is loaded on first use. The first run may take longer if the model is not cached locally.
+- This project is a screening aid, not a final hiring decision engine.
+
+## Data Privacy
+
+All resume storage and search happen locally on your machine. The only external calls are to your configured local LLM server and any one-time model downloads you choose to perform.

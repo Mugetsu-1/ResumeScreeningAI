@@ -1,50 +1,55 @@
 # System Architecture
 
-The system is strictly divided into an isolated 5-Phase pipeline. This ensures modularity, easy debugging, and swapping of components (e.g., swapping ChromaDB for Pinecone, or LM Studio for an external OpenAI API).
+This project follows a simple local pipeline:
 
-## Technical Stack
+`Streamlit UI -> Resume Parser -> ChromaDB -> Ranker / RAG Agent -> Streamlit UI`
 
-- **Backend UI:** Streamlit (app.py)
-- **Memory/Vectors:** ChromaDB (database.py)
-- **Embeddings:** sentence-transformers/all-MiniLM-L6-v2 (PyTorch)
-- **Generative AI Framework:** LangChain (langchain-openai, langchain-core) (agent.py)
-- **NLP / RegEx Matching:** spaCy (en_core_web_sm), Python re module (parser.py)
+## Components
 
-## Flow Diagram
+### `app.py`
 
-### Phase 1: Ingestion & Parsing (parser.py)
+The Streamlit interface for uploading resumes, entering a job description, viewing rankings, and chatting with the assistant.
 
-1. **Multithreading:** Triggered by Streamlit, files are sent to a ThreadPoolExecutor to be processed concurrently.
-2. **Raw Extraction:** Uses pdfplumber (for PDFs) and docx (for Word arrays) to ingest byte streams without saving files to disk.
-3. **NLP Slicing:** A highly optimized spaCy instance (with heavy pipelines disabled like tagger and lemmatizer) extracts candidate names (PERSON entities).
-4. **O(1) Master Regex:** A pre-compiled Regex map scans the entire resume array once to find keyword skills (e.g., matching "ML" and "Machine Learning" to machine learning).
-5. **Heuristics:** Basic Regex captures Emails, Phone Numbers, and "Years of Experience". Extracts a Pandas DataFrame.
+### `parser.py`
 
-### Phase 2: Logical Chunking & Vector DB (database.py)
+Reads resume files, extracts text, identifies structured data, and builds a pandas DataFrame for downstream processing.
 
-1. **Sectioning:** The parser splits resumes into logical blocks (experience, education, skills, projects, etc.).
-2. **Embedding:** SentenceTransformer processes these chunks into dense vector embeddings. It attempts to load onto CUDA (GPU), but safely falls back to CPU if PyTorch CUDA isn't supported (as on Python 3.14). Batch chunking (batch_size=32) optimizes speed.
-3. **Storage:** Vectors, raw text, and structured Metadata (Years of EXP, is_intern, Skills list) are pushed to ChromaDB.
+### `database.py`
 
-### Phase 3: Hybrid Ranking Engine (ranker.py)
+Embeds resume sections and stores them in a persistent ChromaDB collection on disk.
 
-This calculates a deterministic score to prevent relying entirely on the "black-box" nature of embeddings:
+### `ranker.py`
 
-- Rankers extract required skills/experience from the Job Description.
-- Pings ChromaDB to pull the top 20 semantic chunks matching the Job Description.
-- Calculates Final Score (0.0 - 1.0 scale) using weights:
-  - **50% Semantic Score:** Max inverted L2-Distance from the vector database.
-  - **30% Skill Overlap:** Strict set intersection of required vs. candidate skills.
-  - **20% Experience Fit:** Linear capping of expected vs. provided years of experience.
+Runs deterministic scoring over retrieved candidate chunks to rank resumes against a job description.
 
-### Phase 4: Agentic RAG (agent.py)
+### `agent.py`
 
-Utilizes a dynamic 2-step LLM chain architecture connecting to local LM Studio via standard langchain_openai:
+Uses an OpenAI-compatible local model to:
 
-1. **Query Router:** Instead of trusting the LLM to write database queries directly, the Router takes natural language ("Find me ML software engineers who are interns") and coerces it into a hard JSON object ({"search_str": "software engineer", "filter": {"is_intern": true}}).
-2. **Vector Lookup:** The JSON filter is passed into ChromaDB. The top 5 matching candidate chunks are loaded.
-3. **Synthesis Agent:** Forms an augmented prompt with strictly injected text chunks. Applies rules preventing hallucination (e.g., "Cite the candidate_id").
+- turn natural language into a search request
+- optionally apply a metadata filter
+- synthesize an answer from retrieved resume text
 
-### Phase 5: Dashboard UI (app.py)
+## Data Flow
 
-Streamlit ties these phases together into interactive tabs, keeping state across re-renders and graphing analytics (e.g., "Missing Skills Distribution" via plotly.express).
+1. A user uploads one or more resumes.
+2. The parser extracts text and metadata.
+3. Resume sections are embedded and stored in ChromaDB.
+4. The ranker queries the database and computes final candidate scores.
+5. The chat assistant performs semantic search and generates a grounded response.
+
+## Design Choices
+
+- Persistent local storage keeps data between app restarts.
+- Lazy loading of the embedding model avoids slow startup work until data is actually needed.
+- The router is constrained to a small metadata schema to reduce query errors.
+- The ranking formula remains deterministic so results are reproducible.
+
+## Extensibility
+
+The code is intentionally split into small modules so each layer can be replaced independently:
+
+- swap ChromaDB for another vector store
+- swap LM Studio for another OpenAI-compatible endpoint
+- expand the skill map in the parser
+- add OCR or better resume normalization later
