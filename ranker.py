@@ -37,10 +37,10 @@ class CandidateRanker:
                 if cid not in candidates_scores:
                     candidates_scores[cid] = {
                         "candidate_id": cid,
-                        "email": meta["email"],
+                        "email": str(meta.get("email", "")),
                         "skills": [s for s in meta["skills"].split(",") if s and s != "none"],
-                        "years_of_exp": meta["years_of_exp"],
-                        "is_intern": meta["is_intern"],
+                        "years_of_exp": float(meta.get("years_of_exp", 0.0) or 0.0),
+                        "is_intern": bool(meta.get("is_intern", False)),
                         "max_semantic_score": sim_score
                     }
                 else:
@@ -76,8 +76,8 @@ class CandidateRanker:
                 "semantic_score": round(sem_score, 4),
                 "skill_overlap": round(overlap_ratio, 4),
                 "exp_fit": round(exp_fit, 4),
-                "matched_skills": list(req_skills_set.intersection(cand_skills_set)),
-                "missing_skills": list(req_skills_set.difference(cand_skills_set))
+                "matched_skills": sorted(req_skills_set.intersection(cand_skills_set)),
+                "missing_skills": sorted(req_skills_set.difference(cand_skills_set))
             })
             
         df = pd.DataFrame(results).sort_values("final_score", ascending=False)

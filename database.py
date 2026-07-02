@@ -5,12 +5,24 @@ from sentence_transformers import SentenceTransformer
 import torch
 
 class VectorDB:
-    def __init__(self, collection_name: str = "resumes"):
-        self.chroma_client = chromadb.Client()
+    def __init__(self, collection_name: str = "resumes", persist_directory: str = "chroma_db", model_name: str = "all-MiniLM-L6-v2"):
+        self.chroma_client = chromadb.PersistentClient(path=persist_directory)
         self.collection = self.chroma_client.get_or_create_collection(name=collection_name)
-        
+
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.encoder = SentenceTransformer("all-MiniLM-L6-v2", device=self.device)
+        self.model_name = model_name
+        self.encoder = None
+
+    def _get_encoder(self):
+        if self.encoder is None:
+            try:
+                self.encoder = SentenceTransformer(self.model_name, device=self.device)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Could not load embedding model '{self.model_name}'. "
+                    "Install the model once with internet access or cache it locally before running the app."
+                ) from exc
+        return self.encoder
 
     def ingest_parsed_df(self, df: pd.DataFrame):
         """
@@ -50,14 +62,15 @@ class VectorDB:
 
         if texts:
             # Batch encode
-            embeddings = self.encoder.encode(
+            encoder = self._get_encoder()
+            embeddings = encoder.encode(
                 texts, 
                 batch_size=32, 
                 device=self.device, 
                 normalize_embeddings=True
             ).tolist()
             
-            self.collection.add(
+            self.collection.upsert(
                 ids=ids,
                 embeddings=embeddings,
                 documents=texts,
@@ -65,7 +78,8 @@ class VectorDB:
             )
 
     def semantic_search(self, query: str, where_filter: Dict[str, Any] = None, top_k: int = 10) -> Dict[str, Any]:
-        query_emb = self.encoder.encode([query]).tolist()[0]
+        encoder = self._get_encoder()
+        query_emb = encoder.encode([query], normalize_embeddings=True).tolist()[0]
         results = self.collection.query(
             query_embeddings=[query_emb],
             n_results=top_k,

@@ -14,10 +14,15 @@ def init_system():
     parser = ResumeParser()
     db = VectorDB()
     ranker = CandidateRanker(db, parser)
-    agent = ChatbotAgent(db, llm_api_key="lm-studio")
+    agent = ChatbotAgent(db)
     return parser, db, ranker, agent
 
 parser, db, ranker, agent = init_system()
+
+st.title("AI Resume Screening")
+st.caption(
+    "Upload PDF or DOCX resumes, rank candidates against a job description, and query the candidate pool with a local OpenAI-compatible model."
+)
 
 # Sidebar
 st.sidebar.title("Data Ingestion")
@@ -29,12 +34,15 @@ if st.sidebar.button("Ingest Resumes"):
             files_info.append({
                 "candidate_id": f"C_{i+1}_{f.name}",
                 "filename": f.name,
-                "bytes": f.read()
+                "bytes": f.getvalue()
             })
-        with st.spinner("Phase 1 & 2: Parsing & Vectorizing..."):
-            df_parsed = parser.parse_resumes(files_info)
-            db.ingest_parsed_df(df_parsed)
-        st.sidebar.success(f"Ingested {len(uploaded_files)} resumes.")
+        try:
+            with st.spinner("Phase 1 & 2: Parsing & Vectorizing..."):
+                df_parsed = parser.parse_resumes(files_info)
+                db.ingest_parsed_df(df_parsed)
+            st.sidebar.success(f"Ingested {len(uploaded_files)} resumes.")
+        except Exception as exc:
+            st.sidebar.error(f"Failed to ingest resumes: {exc}")
     else:
         st.sidebar.warning("Upload resumes first.")
 
@@ -47,26 +55,30 @@ tab1, tab2 = st.tabs(["Rankings Dashboard", "RAG Chatbot"])
 with tab1:
     st.header("Phase 3: Ranked Candidates")
     if st.button("Score & Rank Candidates"):
-        with st.spinner("Calculating Hybrid Scores..."):
-            ranked_df = ranker.rank_candidates(job_desc, req_years_exp=req_exp)
-            if not ranked_df.empty:
-                st.dataframe(ranked_df)
-                
-                # Plotly Chart
-                all_missing = []
-                for ms in ranked_df["missing_skills"]:
-                    all_missing.extend(ms)
-                
-                if all_missing:
-                    missing_s = pd.Series(all_missing).value_counts().reset_index()
-                    missing_s.columns = ["Skill", "Count"]
-                    fig = px.bar(missing_s, x="Skill", y="Count", title="Missing Skills Distribution")
-                    st.plotly_chart(fig)
-            else:
-                st.info("No candidates ranked yet or DB empty.")
+        try:
+            with st.spinner("Calculating Hybrid Scores..."):
+                ranked_df = ranker.rank_candidates(job_desc, req_years_exp=req_exp)
+                if not ranked_df.empty:
+                    st.dataframe(ranked_df)
+
+                    # Plotly chart of missing skills across the ranked candidates.
+                    all_missing = []
+                    for ms in ranked_df["missing_skills"]:
+                        all_missing.extend(ms)
+
+                    if all_missing:
+                        missing_s = pd.Series(all_missing).value_counts().reset_index()
+                        missing_s.columns = ["Skill", "Count"]
+                        fig = px.bar(missing_s, x="Skill", y="Count", title="Missing Skills Distribution")
+                        st.plotly_chart(fig)
+                else:
+                    st.info("No candidates ranked yet or the database is empty.")
+        except Exception as exc:
+            st.error(f"Failed to rank candidates: {exc}")
 
 with tab2:
     st.header("Phase 4: Agentic Recruiter Assistant")
+    st.write("Ask questions like: `Find Python candidates with AWS experience` or `Show interns with ML projects`.")
     query = st.chat_input("Ask about candidates (e.g. Find Python interns with ML projects)")
     if query:
         st.chat_message("user").write(query)
@@ -75,4 +87,6 @@ with tab2:
                 response = agent.chat(query)
                 st.chat_message("assistant").write(response)
             except Exception as e:
-                st.chat_message("assistant").write(f"Error querying LLM: {str(e)} (Ensure valid OpenAI Key)")
+                st.chat_message("assistant").write(
+                    "Error querying the local LLM. Make sure LM Studio is running at http://localhost:1234/v1 or set LM_STUDIO_BASE_URL."
+                )
