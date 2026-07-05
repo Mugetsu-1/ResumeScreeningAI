@@ -33,8 +33,9 @@ Local Streamlit app for screening resumes, ranking candidates against a job desc
    python -m spacy download en_core_web_sm
    ```
 
-4. Start a local OpenAI-compatible server such as LM Studio.
-5. Run the app:
+4. Edit `config.py` to point at your LLM provider, endpoint, key, and model.
+5. Start a local or remote LLM provider such as LM Studio, Ollama, or OpenAI.
+6. Run the app:
 
    ```bash
    streamlit run app.py
@@ -45,13 +46,20 @@ Local Streamlit app for screening resumes, ranking candidates against a job desc
 The app defaults to:
 
 - ChromaDB persistence at `chroma_db/`
-- LM Studio base URL: `http://localhost:1234/v1`
-- LM Studio API key placeholder: `lm-studio`
+- LLM provider: `openai_compatible`
+- Base URL: `http://localhost:1234/v1`
+- API key placeholder: `lm-studio`
+- Model: `deepseek-coder-33b-instruct`
 
-You can override the LLM endpoint with environment variables:
+Primary configuration lives in [`config.py`](/D:/ResumeScreeningAI/config.py). You can also override it with environment variables:
 
-- `LM_STUDIO_BASE_URL`
-- `LM_STUDIO_API_KEY`
+- `LLM_PROVIDER`
+- `LLM_BASE_URL`
+- `LLM_API_KEY`
+- `LLM_MODEL`
+- `LLM_TIMEOUT`
+- `LLM_TEMPERATURE`
+- `LLM_MAX_TOKENS`
 
 See `.env.example` for a sample setup.
 
