@@ -12,9 +12,6 @@ python-docx
 spacy
 chromadb
 sentence-transformers
-langchain
-langchain-openai
-langchain-core
 streamlit
 plotly
 torch
