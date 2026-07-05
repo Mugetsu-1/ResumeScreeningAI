@@ -37,7 +37,7 @@ if st.sidebar.button("Ingest Resumes"):
                 "bytes": f.getvalue()
             })
         try:
-            with st.spinner("Phase 1 & 2: Parsing & Vectorizing..."):
+            with st.spinner("Parsing and indexing resumes..."):
                 df_parsed = parser.parse_resumes(files_info)
                 db.ingest_parsed_df(df_parsed)
             st.sidebar.success(f"Ingested {len(uploaded_files)} resumes.")
@@ -53,10 +53,10 @@ req_exp = st.sidebar.number_input("Required Years of Exp", min_value=0.0, value=
 tab1, tab2 = st.tabs(["Rankings Dashboard", "RAG Chatbot"])
 
 with tab1:
-    st.header("Phase 3: Ranked Candidates")
+    st.header("Ranked Candidates")
     if st.button("Score & Rank Candidates"):
         try:
-            with st.spinner("Calculating Hybrid Scores..."):
+            with st.spinner("Calculating candidate scores..."):
                 ranked_df = ranker.rank_candidates(job_desc, req_years_exp=req_exp)
                 if not ranked_df.empty:
                     st.dataframe(ranked_df)
@@ -77,7 +77,7 @@ with tab1:
             st.error(f"Failed to rank candidates: {exc}")
 
 with tab2:
-    st.header("Phase 4: Agentic Recruiter Assistant")
+    st.header("Candidate Assistant")
     st.write("Ask questions like: `Find Python candidates with AWS experience` or `Show interns with ML projects`.")
     query = st.chat_input("Ask about candidates (e.g. Find Python interns with ML projects)")
     if query:
@@ -86,7 +86,7 @@ with tab2:
             try:
                 response = agent.chat(query)
                 st.chat_message("assistant").write(response)
-            except Exception as e:
+            except Exception:
                 st.chat_message("assistant").write(
-                    "Error querying the local LLM. Make sure LM Studio is running at http://localhost:1234/v1 or set LM_STUDIO_BASE_URL."
+                    "I couldn't reach the configured LLM. Check the provider, base URL, API key, and model settings."
                 )
